@@ -181,9 +181,8 @@ function ensureInPagePanel() {
     willChange: 'transform, opacity'
   });
 
-  // Create an iframe that contains the existing popup.html UI
+  // Create iframe for the panel UI (popup.html)
   skuryPanelIFrame = document.createElement('iframe');
-  // Prevent focusing the parent tab from being lost: keep iframe out of tab order
   skuryPanelIFrame.setAttribute('tabindex', '-1');
   skuryPanelIFrame.setAttribute('aria-hidden', 'false');
   Object.assign(skuryPanelIFrame.style, {
@@ -194,6 +193,9 @@ function ensureInPagePanel() {
     pointerEvents: 'auto'
   });
 
+  // Append the iframe before assigning src
+  skuryPanelEl.appendChild(skuryPanelIFrame);
+
   // --- Focus trap: keep main tab focused even when iframe is clicked ---
   window.addEventListener('blur', () => {
     try {
@@ -201,13 +203,30 @@ function ensureInPagePanel() {
     } catch (_) {}
   }, true);
 
-  // Append the iframe (no overlays)
-  skuryPanelEl.appendChild(skuryPanelIFrame);
-
-  // Assign src after a tick
+  // Assign src asynchronously to avoid any initial focus glitches
   setTimeout(() => {
     skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
   }, 0);
+
+  // Extra guard: if the browser tries to focus the iframe on load, immediately blur it
+  skuryPanelIFrame.addEventListener('load', () => {
+    try {
+      // remove any autofocus attributes inside just in case
+      const doc = skuryPanelIFrame.contentDocument;
+      if (doc) {
+        const af = doc.querySelector('[autofocus]');
+        if (af) af.removeAttribute('autofocus');
+      }
+      // ensure the frame itself is not the active element
+      if (document.activeElement === skuryPanelIFrame) {
+        skuryPanelIFrame.blur();
+      }
+      // avoid pulling focus into the iframe's window
+      if (skuryPanelIFrame.contentWindow && skuryPanelIFrame.contentWindow.blur) {
+        skuryPanelIFrame.contentWindow.blur();
+      }
+    } catch (e) { /* no-op */ }
+  }, { once: true });
 
   // Stop clicks inside the iframe from bubbling to a global backdrop handler
   skuryPanelIFrame.addEventListener('mousedown', (e) => {

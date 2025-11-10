@@ -185,9 +185,35 @@ function ensureInPagePanel() {
   skuryPanelIFrame = document.createElement('iframe');
   skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
 
-  // Make iframe non-focusable so it doesn't steal the window's focus.
-  // We still allow pointer events so the UI is usable.
-  skuryPanelIFrame.setAttribute('tabindex', '-1');
+    // --- Non-focus-stealing iframe creation ---
+    skuryPanelIFrame = document.createElement('iframe');
+
+    // Prevent focus capture by iframe
+    skuryPanelIFrame.setAttribute('tabindex', '-1');
+    skuryPanelIFrame.setAttribute('aria-hidden', 'true');
+
+    Object.assign(skuryPanelIFrame.style, {
+      border: 'none',
+      width: '100%',
+      height: '100%',
+      display: 'block',
+      pointerEvents: 'auto'
+    });
+
+    // Append the iframe first (blank, no src yet)
+    skuryPanelEl.appendChild(skuryPanelIFrame);
+
+    // Delay assigning src to prevent Chrome from focusing the iframe on creation
+    // This avoids triggering window.blur on the main tab
+    setTimeout(() => {
+      // Optional: disable pointer events during first paint
+      skuryPanelIFrame.style.pointerEvents = 'none';
+      setTimeout(() => {
+        skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
+        skuryPanelIFrame.style.pointerEvents = 'auto';
+      }, 200);
+    }, 0);
+
   Object.assign(skuryPanelIFrame.style, {
     border: 'none',
     width: '100%',
@@ -195,6 +221,26 @@ function ensureInPagePanel() {
     display: 'block',
     pointerEvents: 'auto'
   });
+
+  // Extra guard: if the browser tries to focus the iframe on load, immediately blur it
+  skuryPanelIFrame.addEventListener('load', () => {
+    try {
+      // remove any autofocus attributes inside just in case
+      const doc = skuryPanelIFrame.contentDocument;
+      if (doc) {
+        const af = doc.querySelector('[autofocus]');
+        if (af) af.removeAttribute('autofocus');
+      }
+      // ensure the frame itself is not the active element
+      if (document.activeElement === skuryPanelIFrame) {
+        skuryPanelIFrame.blur();
+      }
+      // avoid pulling focus into the iframe's window
+      if (skuryPanelIFrame.contentWindow && skuryPanelIFrame.contentWindow.blur) {
+        skuryPanelIFrame.contentWindow.blur();
+      }
+    } catch (e) { /* no-op */ }
+  }, { once: true });
 
   // Stop clicks inside the iframe from bubbling to a global backdrop handler
   skuryPanelIFrame.addEventListener('mousedown', (e) => {
@@ -209,6 +255,7 @@ function ensureInPagePanel() {
   // Add a lightweight click-outside handler on the document (no full-screen overlay)
   setTimeout(() => {
     document.addEventListener('mousedown', _onDocumentMouseDown);
+    console.log('Skury: in-page sidebar initialized without focus capture');
   }, 0);
 
   // Apply initial theme to panel

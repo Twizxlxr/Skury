@@ -130,170 +130,70 @@ function updateBubbleColor() {
 
 updateBubbleColor();
 
-// === In-page side panel using Shadow DOM (no iframe) ===
-let skuryPanelHost = null;
+// === In-page side panel (iframe with invisible focus proxy) ===
+let skuryPanel = null;
+let skuryIframe = null;
+let focusProxy = null;
 
 async function ensureInPagePanel() {
-  const existing = document.getElementById('skuryPanelHost');
-  if (existing) { skuryPanelHost = existing; return existing; }
+  if (skuryPanel) return skuryPanel;
 
-  // Create host container
-  const host = document.createElement('div');
-  host.id = 'skuryPanelHost';
-  Object.assign(host.style, {
+  // === Sidebar container ===
+  skuryPanel = document.createElement('div');
+  skuryPanel.id = 'skuryPanel';
+  Object.assign(skuryPanel.style, {
     position: 'fixed',
     top: '0',
     right: '0',
-    width: '400px',
+    width: '420px',
     height: '100vh',
     zIndex: '2147483646',
-    boxShadow: '0 0 12px rgba(0,0,0,0.5)',
     background: 'transparent',
-    display: 'none'
+    display: 'none',
+    transform: 'translateX(100%)',
+    opacity: '0',
+    transition: 'transform 0.3s ease, opacity 0.3s ease'
   });
 
-  // Attach shadow root (open for dev tools access)
-  const shadow = host.attachShadow({ mode: 'open' });
+  // === Invisible focus proxy ===
+  focusProxy = document.createElement('iframe');
+  Object.assign(focusProxy.style, {
+    position: 'absolute',
+    top: '0',
+    left: '-9999px',
+    width: '1px',
+    height: '1px',
+    opacity: '0',
+    pointerEvents: 'none'
+  });
+  document.body.appendChild(focusProxy);
 
-  // Inject styles.css into shadow root
-  const styleLink = document.createElement('link');
-  styleLink.rel = 'stylesheet';
-  styleLink.href = chrome.runtime.getURL('styles.css');
-  shadow.appendChild(styleLink);
+  // === Sidebar iframe ===
+  skuryIframe = document.createElement('iframe');
+  skuryIframe.src = chrome.runtime.getURL('popup.html');
+  skuryIframe.allow = 'clipboard-write';
+  Object.assign(skuryIframe.style, {
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    pointerEvents: 'auto'
+  });
+  skuryIframe.setAttribute('tabindex', '-1');
 
-  // Fetch and inject popup.html content
-  const htmlText = await fetch(chrome.runtime.getURL('popup.html')).then(r => r.text());
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlText, 'text/html');
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = doc.body.innerHTML;
-  shadow.appendChild(wrapper);
+  // Auto-restore main tab focus if iframe ever becomes active
+  setInterval(() => {
+    if (document.activeElement === skuryIframe) {
+      try { focusProxy.focus(); } catch (_) {}
+    }
+  }, 100);
 
-  // Bootstrap: scope DOM queries to the shadow root first (fallback to document)
-  const bootstrap = document.createElement('script');
-  bootstrap.type = 'module';
-  const bootstrapCode = `
-    const root = document.currentScript.getRootNode();
-    const d = document;
-    const ogById = d.getElementById.bind(d);
-    const ogQS = d.querySelector.bind(d);
-    const ogQSA = d.querySelectorAll.bind(d);
-    const ogByClass = d.getElementsByClassName.bind(d);
-    const ogByTag = d.getElementsByTagName.bind(d);
-    const qFromRoot = (sel) => (root && root.querySelector) ? root.querySelector(sel) : null;
-    const qaFromRoot = (sel) => (root && root.querySelectorAll) ? root.querySelectorAll(sel) : [];
-    d.getElementById = (id) => (root && root.getElementById ? root.getElementById(id) : qFromRoot('#'+CSS.escape(id))) || ogById(id);
-    d.querySelector = (sel) => qFromRoot(sel) || ogQS(sel);
-    d.querySelectorAll = (sel) => {
-      const list = qaFromRoot(sel);
-      return (list && list.length) ? list : ogQSA(sel);
-    };
-    d.getElementsByClassName = (cls) => (root && root.getElementsByClassName ? root.getElementsByClassName(cls) : ogByClass(cls));
-    d.getElementsByTagName = (tag) => (root && root.getElementsByTagName ? root.getElementsByTagName(tag) : ogByTag(tag));
-    window.__SKURY_SHADOW_ROOT__ = root;
-    // chrome.* polyfill via content-script bridge
-    if (!window.chrome) window.chrome = {};
-    if (!window.chrome.runtime) window.chrome.runtime = {};
-    if (!window.chrome.storage) window.chrome.storage = { local: {} };
-    const callbacks = new Map();
-    window.addEventListener('message', (ev) => {
-      const data = ev.data;
-      if (!data || data.type !== 'SKURY_BRIDGE_RES') return;
-      const cb = callbacks.get(data.id);
-      if (cb) {
-        callbacks.delete(data.id);
-        cb(data);
-      }
-    });
-    const request = (api, payload, cb) => {
-      const id = 'skury_' + Math.random().toString(36).slice(2);
-      if (cb) callbacks.set(id, cb);
-      window.postMessage({ type: 'SKURY_BRIDGE_REQ', id, api, payload }, '*');
-    };
-    window.chrome.runtime.sendMessage = (message, callback) => {
-      request('runtime.sendMessage', { message }, (res) => callback && callback(res && (res.response !== undefined ? res.response : res)));
-    };
-    window.chrome.storage.local.get = (keys, callback) => {
-      request('storage.local.get', { keys }, (res) => callback && callback(res && res.result));
-    };
-    window.chrome.storage.local.set = (items, callback) => {
-      request('storage.local.set', { items }, () => callback && callback());
-    };
-    window.chrome.runtime.connect = (_info) => {
-      // no-op stub to avoid crashes; returns minimal port-like object
-      return {
-        onDisconnect: { addListener: () => {} },
-        onMessage: { addListener: () => {} },
-        postMessage: () => {},
-        disconnect: () => {}
-      };
-    };
-  `;
-  const bootstrapBlob = new Blob([bootstrapCode], { type: 'module/javascript' });
-  bootstrap.src = URL.createObjectURL(bootstrapBlob);
-  shadow.appendChild(bootstrap);
-
-  // Load sidebar.js and popup.js as module scripts inside shadow root
-  for (const scriptName of ['sidebar.js', 'popup.js']) {
-    const code = await fetch(chrome.runtime.getURL(scriptName)).then(r => r.text());
-    const blob = new Blob([code], { type: 'module/javascript' });
-    const url = URL.createObjectURL(blob);
-    const script = document.createElement('script');
-    script.type = 'module';
-    script.src = url;
-    shadow.appendChild(script);
-  }
-
-  // Add to page
-  document.body.appendChild(host);
-  skuryPanelHost = host;
-  console.log('Skury: Shadow DOM sidebar initialized');
-
-  // Apply initial theme to panel host
-  try {
-    chrome.storage.local.get(['skuryTheme'], (result) => {
-      applyPanelTheme(result.skuryTheme);
-    });
-  } catch {}
-
-  return host;
+  skuryPanel.appendChild(skuryIframe);
+  document.body.appendChild(skuryPanel);
+  console.log('Skury sidebar initialized');
+  return skuryPanel;
 }
 
-// Bridge: handle page-world chrome.* polyfill requests from shadow UI
-window.addEventListener('message', (event) => {
-  try {
-    if (event.source !== window) return;
-    const data = event.data;
-    if (!data || data.type !== 'SKURY_BRIDGE_REQ') return;
-    const { id, api, payload } = data;
-
-    const respond = (msg) => window.postMessage({ type: 'SKURY_BRIDGE_RES', id, ...msg }, '*');
-
-    if (api === 'runtime.sendMessage') {
-      chrome.runtime.sendMessage(payload && payload.message, (response) => {
-        respond({ response, lastError: chrome.runtime.lastError ? chrome.runtime.lastError.message : null });
-      });
-      return;
-    }
-    if (api === 'storage.local.get') {
-      chrome.storage.local.get(payload && payload.keys, (result) => respond({ result }));
-      return;
-    }
-    if (api === 'storage.local.set') {
-      chrome.storage.local.set(payload && payload.items, () => respond({ result: true }));
-      return;
-    }
-    // No-op stubs for runtime.connect used by popup.js keepalive
-    if (api === 'runtime.connect') {
-      // not supported via bridge; acknowledge to avoid errors
-      respond({ result: true });
-      return;
-    }
-    respond({ error: 'Unsupported API: ' + api });
-  } catch (e) {
-    try { window.postMessage({ type: 'SKURY_BRIDGE_RES', id: event?.data?.id, error: String(e) }, '*'); } catch (_) {}
-  }
-});
+// (Removed shadow DOM bridge code; iframe approach restored.)
 
 // helper to detect clicks outside the panel and close it
 function _onDocumentMouseDown(ev) {
@@ -309,11 +209,22 @@ async function toggleInPagePanel(forceState) {
   const panel = await ensureInPagePanel();
   const isOpen = panel.style.display !== 'none';
   const shouldOpen = typeof forceState === 'boolean' ? forceState : !isOpen;
-  panel.style.display = shouldOpen ? 'block' : 'none';
+
+  if (shouldOpen) {
+    panel.style.display = 'block';
+    requestAnimationFrame(() => {
+      panel.style.transform = 'translateX(0)';
+      panel.style.opacity = '1';
+    });
+  } else {
+    panel.style.transform = 'translateX(100%)';
+    panel.style.opacity = '0';
+    setTimeout(() => (panel.style.display = 'none'), 300);
+  }
 }
 
 function applyPanelTheme(theme) {
-  const panel = document.getElementById('skuryPanelHost');
+  const panel = document.getElementById('skuryPanel');
   if (!panel) return;
   panel.classList.remove('theme-dark', 'theme-light');
   panel.classList.add(`theme-${theme}`);

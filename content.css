@@ -171,6 +171,10 @@
   pointer-events: auto;
 }
 
+#skuryPanel iframe {
+  pointer-events: auto;
+}
+
 /* Removed theme-translucent panel variant; Adaptive resolves to dark or light */
 #skuryPanelHost {
   all: initial;

@@ -203,6 +203,40 @@ function ensureInPagePanel() {
     // Append the iframe first (blank, no src yet)
     skuryPanelEl.appendChild(skuryPanelIFrame);
 
+    // === Transparent click relay layer ===
+    // This overlay sits on top of the iframe to intercept focus events,
+    // forwarding clicks to the iframe via postMessage without giving it focus.
+    const relayLayer = document.createElement('div');
+    Object.assign(relayLayer.style, {
+      position: 'absolute',
+      top: '0',
+      left: '0',
+      width: '100%',
+      height: '100%',
+      zIndex: '2147483647', // higher than iframe
+      background: 'transparent',
+      pointerEvents: 'auto'
+    });
+
+    // Intercept all clicks/taps and forward them
+    relayLayer.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      try {
+        skuryPanelIFrame.contentWindow?.postMessage(
+          { type: 'relayClick', x: e.clientX, y: e.clientY },
+          '*'
+        );
+      } catch (_) {}
+    });
+
+    // Prevent any focus changes
+    relayLayer.addEventListener('focus', (e) => {
+      e.preventDefault();
+      try { window.focus(); } catch(_) {}
+    }, true);
+
+    skuryPanelEl.appendChild(relayLayer);
+
     // Delay assigning src to prevent Chrome from focusing the iframe on creation
     // This avoids triggering window.blur on the main tab
     setTimeout(() => {

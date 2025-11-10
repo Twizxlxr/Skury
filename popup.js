@@ -10,6 +10,21 @@ try {
   console.warn('Skury popup focus-guard failed', err);
 }
 
+// Receive click relay events from parent content script
+window.addEventListener('message', (e) => {
+  try {
+    if (e?.data?.type === 'relayClick') {
+      const x = e.data.x, y = e.data.y;
+      const el = document.elementFromPoint(x, y);
+      if (el) {
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+      }
+    }
+  } catch (err) {
+    console.warn('Skury relayClick handler error', err);
+  }
+});
+
 // Keep-alive port to keep service worker alive while the side panel / popup is open.
 let __skury_port = null;
 let __skury_reconnect_timer = null;

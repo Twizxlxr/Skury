@@ -1,9 +1,13 @@
-// --- Prevent iframe focus from stealing page focus ---
+// --- Prevent iframe focus from stealing main page focus ---
 try {
   window.addEventListener('focus', () => {
     if (window.top && window.top !== window) {
-      // Immediately return focus to the top window (main tab)
-      try { window.top.focus(); } catch (_) {}
+      try {
+        window.top.focus(); // immediately refocus main tab
+      } catch (_) {}
+      setTimeout(() => { 
+        try { window.blur(); } catch (_) {} // self-blur instantly
+      }, 0);
     }
   }, true);
 } catch (err) {

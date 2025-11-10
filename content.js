@@ -183,71 +183,9 @@ function ensureInPagePanel() {
 
   // Create an iframe that contains the existing popup.html UI
   skuryPanelIFrame = document.createElement('iframe');
-  skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
-
-    // --- Non-focus-stealing iframe creation ---
-    skuryPanelIFrame = document.createElement('iframe');
-
-    // Prevent focus capture by iframe
-    skuryPanelIFrame.setAttribute('tabindex', '-1');
-    skuryPanelIFrame.setAttribute('aria-hidden', 'true');
-
-    Object.assign(skuryPanelIFrame.style, {
-      border: 'none',
-      width: '100%',
-      height: '100%',
-      display: 'block',
-      pointerEvents: 'auto'
-    });
-
-    // Append the iframe first (blank, no src yet)
-    skuryPanelEl.appendChild(skuryPanelIFrame);
-
-    // === Transparent click relay layer ===
-    // This overlay sits on top of the iframe to intercept focus events,
-    // forwarding clicks to the iframe via postMessage without giving it focus.
-    const relayLayer = document.createElement('div');
-    Object.assign(relayLayer.style, {
-      position: 'absolute',
-      top: '0',
-      left: '0',
-      width: '100%',
-      height: '100%',
-      zIndex: '2147483647', // higher than iframe
-      background: 'transparent',
-      pointerEvents: 'auto'
-    });
-
-    // Intercept all clicks/taps and forward them
-    relayLayer.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      try {
-        skuryPanelIFrame.contentWindow?.postMessage(
-          { type: 'relayClick', x: e.clientX, y: e.clientY },
-          '*'
-        );
-      } catch (_) {}
-    });
-
-    // Prevent any focus changes
-    relayLayer.addEventListener('focus', (e) => {
-      e.preventDefault();
-      try { window.focus(); } catch(_) {}
-    }, true);
-
-    skuryPanelEl.appendChild(relayLayer);
-
-    // Delay assigning src to prevent Chrome from focusing the iframe on creation
-    // This avoids triggering window.blur on the main tab
-    setTimeout(() => {
-      // Optional: disable pointer events during first paint
-      skuryPanelIFrame.style.pointerEvents = 'none';
-      setTimeout(() => {
-        skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
-        skuryPanelIFrame.style.pointerEvents = 'auto';
-      }, 200);
-    }, 0);
-
+  // Prevent focusing the parent tab from being lost: keep iframe out of tab order
+  skuryPanelIFrame.setAttribute('tabindex', '-1');
+  skuryPanelIFrame.setAttribute('aria-hidden', 'false');
   Object.assign(skuryPanelIFrame.style, {
     border: 'none',
     width: '100%',
@@ -256,25 +194,20 @@ function ensureInPagePanel() {
     pointerEvents: 'auto'
   });
 
-  // Extra guard: if the browser tries to focus the iframe on load, immediately blur it
-  skuryPanelIFrame.addEventListener('load', () => {
+  // --- Focus trap: keep main tab focused even when iframe is clicked ---
+  window.addEventListener('blur', () => {
     try {
-      // remove any autofocus attributes inside just in case
-      const doc = skuryPanelIFrame.contentDocument;
-      if (doc) {
-        const af = doc.querySelector('[autofocus]');
-        if (af) af.removeAttribute('autofocus');
-      }
-      // ensure the frame itself is not the active element
-      if (document.activeElement === skuryPanelIFrame) {
-        skuryPanelIFrame.blur();
-      }
-      // avoid pulling focus into the iframe's window
-      if (skuryPanelIFrame.contentWindow && skuryPanelIFrame.contentWindow.blur) {
-        skuryPanelIFrame.contentWindow.blur();
-      }
-    } catch (e) { /* no-op */ }
-  }, { once: true });
+      window.focus(); // instantly refocus parent tab
+    } catch (_) {}
+  }, true);
+
+  // Append the iframe (no overlays)
+  skuryPanelEl.appendChild(skuryPanelIFrame);
+
+  // Assign src after a tick
+  setTimeout(() => {
+    skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
+  }, 0);
 
   // Stop clicks inside the iframe from bubbling to a global backdrop handler
   skuryPanelIFrame.addEventListener('mousedown', (e) => {
@@ -282,7 +215,6 @@ function ensureInPagePanel() {
   }, { passive: true });
 
   // Append elements
-  skuryPanelEl.appendChild(skuryPanelIFrame);
   document.body.appendChild(skuryBackdropEl);
   document.body.appendChild(skuryPanelEl);
 

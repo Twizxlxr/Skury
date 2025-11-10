@@ -1,0 +1,174 @@
+/* === Skury Bubble === */
+#aiBubble {
+  position: fixed;
+  right: 6px;
+  top: 40%;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  cursor: grab;
+  background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+  background-size: 80%;
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 2147483647;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(139, 92, 246, 0.15),
+              0 0 15px rgba(139, 92, 246, 0.12),
+              0 0 30px rgba(139, 92, 246, 0.08),
+              inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  animation: purpleGlow 4s ease-in-out infinite;
+}
+
+/* === Theme Variations for Bubble === */
+
+/* Dark theme (default) */
+#aiBubble.theme-dark {
+  background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(139, 92, 246, 0.15),
+              0 0 15px rgba(139, 92, 246, 0.12),
+              0 0 30px rgba(139, 92, 246, 0.08),
+              inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+#aiBubble.theme-dark::before {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(167, 139, 250, 0.1));
+}
+
+#aiBubble.theme-dark:hover {
+  background: linear-gradient(135deg, #333 0%, #222 100%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(139, 92, 246, 0.25),
+              0 0 20px rgba(139, 92, 246, 0.2),
+              0 0 40px rgba(139, 92, 246, 0.15),
+              inset 0 1px 2px rgba(255, 255, 255, 0.1);
+}
+
+/* Light theme */
+#aiBubble.theme-light {
+  background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1),
+              0 0 0 1px rgba(139, 92, 246, 0.2),
+              0 0 15px rgba(139, 92, 246, 0.15),
+              0 0 30px rgba(139, 92, 246, 0.1),
+              inset 0 1px 1px rgba(255, 255, 255, 0.8);
+}
+
+#aiBubble.theme-light::before {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(167, 139, 250, 0.15));
+}
+
+#aiBubble.theme-light:hover {
+  background: linear-gradient(135deg, #fafafa 0%, #efefef 100%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15),
+              0 0 0 1px rgba(139, 92, 246, 0.3),
+              0 0 20px rgba(139, 92, 246, 0.25),
+              0 0 40px rgba(139, 92, 246, 0.18),
+              inset 0 1px 2px rgba(255, 255, 255, 1);
+}
+
+/* Translucent theme */
+/* Translucent bubble style removed; adaptive uses dark/light actual themes */
+
+#aiBubble::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(167, 139, 250, 0.1));
+  z-index: -1;
+  opacity: 0.5;
+  filter: blur(6px);
+}
+
+#aiBubble:active {
+  cursor: grabbing;
+  transform: scale(0.95);
+}
+
+#aiBubble:hover {
+  transform: scale(1.08);
+  background: linear-gradient(135deg, #333 0%, #222 100%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(139, 92, 246, 0.25),
+              0 0 20px rgba(139, 92, 246, 0.2),
+              0 0 40px rgba(139, 92, 246, 0.15),
+              inset 0 1px 2px rgba(255, 255, 255, 0.1);
+}
+
+#aiBubble:hover::before {
+  opacity: 0.7;
+  filter: blur(8px);
+}
+
+@keyframes purpleGlow {
+  0%, 100% { 
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(139, 92, 246, 0.15),
+                0 0 15px rgba(139, 92, 246, 0.12),
+                0 0 30px rgba(139, 92, 246, 0.08),
+                inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  }
+  50% { 
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4),
+                0 0 0 1px rgba(139, 92, 246, 0.2),
+                0 0 20px rgba(139, 92, 246, 0.18),
+                0 0 40px rgba(139, 92, 246, 0.12),
+                inset 0 1px 2px rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* === Sliding Panel Animation === */
+#skuryPanel {
+  transform: translateX(100%);
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease;
+  opacity: 0;
+}
+#skuryPanel.skury-open {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+#skuryBackdrop {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+#skuryBackdrop.skury-open {
+  opacity: 1;
+}
+
+#skuryBackdrop {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  /* Ensure backdrop doesn't steal focus/clicks */
+  pointer-events: none !important;
+  background: transparent !important;
+}
+
+/* Panel theme variants */
+#skuryPanel.theme-dark {
+  background: #1f1f1f;
+  box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
+
+#skuryPanel.theme-light {
+  background: #ffffff;
+  box-shadow: 0 0 20px rgba(0,0,0,0.15);
+  border-left: 1px solid rgba(0,0,0,0.06);
+}
+
+/* Panel should be visually on the right and not cause layout reflow */
+#skuryPanel {
+  right: 0;
+  top: 0;
+  width: 400px;
+  height: 100vh;
+  pointer-events: auto;
+}
+
+/* Removed theme-translucent panel variant; Adaptive resolves to dark or light */

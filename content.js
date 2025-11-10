@@ -191,6 +191,43 @@ async function ensureInPagePanel() {
     d.getElementsByClassName = (cls) => (root && root.getElementsByClassName ? root.getElementsByClassName(cls) : ogByClass(cls));
     d.getElementsByTagName = (tag) => (root && root.getElementsByTagName ? root.getElementsByTagName(tag) : ogByTag(tag));
     window.__SKURY_SHADOW_ROOT__ = root;
+    // chrome.* polyfill via content-script bridge
+    if (!window.chrome) window.chrome = {};
+    if (!window.chrome.runtime) window.chrome.runtime = {};
+    if (!window.chrome.storage) window.chrome.storage = { local: {} };
+    const callbacks = new Map();
+    window.addEventListener('message', (ev) => {
+      const data = ev.data;
+      if (!data || data.type !== 'SKURY_BRIDGE_RES') return;
+      const cb = callbacks.get(data.id);
+      if (cb) {
+        callbacks.delete(data.id);
+        cb(data);
+      }
+    });
+    const request = (api, payload, cb) => {
+      const id = 'skury_' + Math.random().toString(36).slice(2);
+      if (cb) callbacks.set(id, cb);
+      window.postMessage({ type: 'SKURY_BRIDGE_REQ', id, api, payload }, '*');
+    };
+    window.chrome.runtime.sendMessage = (message, callback) => {
+      request('runtime.sendMessage', { message }, (res) => callback && callback(res && (res.response !== undefined ? res.response : res)));
+    };
+    window.chrome.storage.local.get = (keys, callback) => {
+      request('storage.local.get', { keys }, (res) => callback && callback(res && res.result));
+    };
+    window.chrome.storage.local.set = (items, callback) => {
+      request('storage.local.set', { items }, () => callback && callback());
+    };
+    window.chrome.runtime.connect = (_info) => {
+      // no-op stub to avoid crashes; returns minimal port-like object
+      return {
+        onDisconnect: { addListener: () => {} },
+        onMessage: { addListener: () => {} },
+        postMessage: () => {},
+        disconnect: () => {}
+      };
+    };
   `;
   const bootstrapBlob = new Blob([bootstrapCode], { type: 'module/javascript' });
   bootstrap.src = URL.createObjectURL(bootstrapBlob);
@@ -221,6 +258,42 @@ async function ensureInPagePanel() {
 
   return host;
 }
+
+// Bridge: handle page-world chrome.* polyfill requests from shadow UI
+window.addEventListener('message', (event) => {
+  try {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.type !== 'SKURY_BRIDGE_REQ') return;
+    const { id, api, payload } = data;
+
+    const respond = (msg) => window.postMessage({ type: 'SKURY_BRIDGE_RES', id, ...msg }, '*');
+
+    if (api === 'runtime.sendMessage') {
+      chrome.runtime.sendMessage(payload && payload.message, (response) => {
+        respond({ response, lastError: chrome.runtime.lastError ? chrome.runtime.lastError.message : null });
+      });
+      return;
+    }
+    if (api === 'storage.local.get') {
+      chrome.storage.local.get(payload && payload.keys, (result) => respond({ result }));
+      return;
+    }
+    if (api === 'storage.local.set') {
+      chrome.storage.local.set(payload && payload.items, () => respond({ result: true }));
+      return;
+    }
+    // No-op stubs for runtime.connect used by popup.js keepalive
+    if (api === 'runtime.connect') {
+      // not supported via bridge; acknowledge to avoid errors
+      respond({ result: true });
+      return;
+    }
+    respond({ error: 'Unsupported API: ' + api });
+  } catch (e) {
+    try { window.postMessage({ type: 'SKURY_BRIDGE_RES', id: event?.data?.id, error: String(e) }, '*'); } catch (_) {}
+  }
+});
 
 // helper to detect clicks outside the panel and close it
 function _onDocumentMouseDown(ev) {

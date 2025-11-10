@@ -1,33 +1,4 @@
-// --- Prevent iframe focus from stealing main page focus ---
-try {
-  window.addEventListener('focus', () => {
-    if (window.top && window.top !== window) {
-      try {
-        window.top.focus(); // immediately refocus main tab
-      } catch (_) {}
-      setTimeout(() => { 
-        try { window.blur(); } catch (_) {} // self-blur instantly
-      }, 0);
-    }
-  }, true);
-} catch (err) {
-  console.warn('Skury popup focus-guard failed', err);
-}
-
-// Receive click relay events from parent content script
-window.addEventListener('message', (e) => {
-  try {
-    if (e?.data?.type === 'relayClick') {
-      const x = e.data.x, y = e.data.y;
-      const el = document.elementFromPoint(x, y);
-      if (el) {
-        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
-      }
-    }
-  } catch (err) {
-    console.warn('Skury relayClick handler error', err);
-  }
-});
+// Shadow DOM version: no focus juggling or relay layer needed.
 
 // Keep-alive port to keep service worker alive while the side panel / popup is open.
 let __skury_port = null;

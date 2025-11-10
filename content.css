@@ -172,3 +172,13 @@
 }
 
 /* Removed theme-translucent panel variant; Adaptive resolves to dark or light */
+#skuryPanelHost {
+  all: initial;
+  position: fixed !important;
+  top: 0;
+  right: 0;
+  width: 400px;
+  height: 100vh;
+  z-index: 2147483646 !important;
+  background: transparent !important;
+}

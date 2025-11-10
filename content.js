@@ -130,157 +130,117 @@ function updateBubbleColor() {
 
 updateBubbleColor();
 
-// === In-page side panel (fallback when sidePanel API isn't available) ===
-let skuryPanelEl = null;
-let skuryPanelIFrame = null;
-let skuryBackdropEl = null;
-let skuryPanelCloseTimeout = null;
-let skuryBackdropCloseTimeout = null;
+// === In-page side panel using Shadow DOM (no iframe) ===
+let skuryPanelHost = null;
 
-// Debug focus/visibility (optional)
-document.addEventListener('visibilitychange', () => {
-  console.log('PAGE visibilitychange -> hidden?', document.hidden);
-});
-window.addEventListener('blur', () => console.log('PAGE blur event'));
-window.addEventListener('focus', () => console.log('PAGE focus event'));
+async function ensureInPagePanel() {
+  const existing = document.getElementById('skuryPanelHost');
+  if (existing) { skuryPanelHost = existing; return existing; }
 
-// === In-page panel: non-focus-stealing version ===
-function ensureInPagePanel() {
-  if (skuryPanelEl) return skuryPanelEl;
-
-  // Optional small backdrop (only covers area behind the panel)
-  skuryBackdropEl = document.createElement('div');
-  skuryBackdropEl.id = 'skuryBackdrop';
-  // keep it only behind the panel and non-intercepting by default
-  Object.assign(skuryBackdropEl.style, {
+  // Create host container
+  const host = document.createElement('div');
+  host.id = 'skuryPanelHost';
+  Object.assign(host.style, {
     position: 'fixed',
     top: '0',
     right: '0',
     width: '400px',
     height: '100vh',
-    background: 'transparent',
-    zIndex: '2147483645',
-    display: 'none',
-    pointerEvents: 'none'
-  });
-
-  // Create a lightweight container for the panel (no full-window backdrop)
-  skuryPanelEl = document.createElement('div');
-  skuryPanelEl.id = 'skuryPanel';
-  Object.assign(skuryPanelEl.style, {
-    position: 'fixed',
-    top: '0',
-    right: '0',
-    width: '400px',            // panel width - keep consistent with CSS
-    height: '100vh',
-    background: 'transparent', // the iframe holds the visible UI
-    boxShadow: '0 0 12px rgba(0,0,0,0.5)',
     zIndex: '2147483646',
-    display: 'none',
-    pointerEvents: 'auto',     // allow interactions inside the panel
-    willChange: 'transform, opacity'
+    boxShadow: '0 0 12px rgba(0,0,0,0.5)',
+    background: 'transparent',
+    display: 'none'
   });
 
-  // Create iframe for the panel UI (popup.html)
-  skuryPanelIFrame = document.createElement('iframe');
-  skuryPanelIFrame.setAttribute('tabindex', '-1');
-  skuryPanelIFrame.setAttribute('aria-hidden', 'false');
-  Object.assign(skuryPanelIFrame.style, {
-    border: 'none',
-    width: '100%',
-    height: '100%',
-    display: 'block',
-    pointerEvents: 'auto'
-  });
+  // Attach shadow root (open for dev tools access)
+  const shadow = host.attachShadow({ mode: 'open' });
 
-  // Append the iframe before assigning src
-  skuryPanelEl.appendChild(skuryPanelIFrame);
+  // Inject styles.css into shadow root
+  const styleLink = document.createElement('link');
+  styleLink.rel = 'stylesheet';
+  styleLink.href = chrome.runtime.getURL('styles.css');
+  shadow.appendChild(styleLink);
 
-  // --- Focus trap: keep main tab focused even when iframe is clicked ---
-  window.addEventListener('blur', () => {
-    try {
-      window.focus(); // instantly refocus parent tab
-    } catch (_) {}
-  }, true);
+  // Fetch and inject popup.html content
+  const htmlText = await fetch(chrome.runtime.getURL('popup.html')).then(r => r.text());
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlText, 'text/html');
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = doc.body.innerHTML;
+  shadow.appendChild(wrapper);
 
-  // Assign src asynchronously to avoid any initial focus glitches
-  setTimeout(() => {
-    skuryPanelIFrame.src = chrome.runtime.getURL('popup.html');
-  }, 0);
+  // Bootstrap: scope DOM queries to the shadow root first (fallback to document)
+  const bootstrap = document.createElement('script');
+  bootstrap.type = 'module';
+  const bootstrapCode = `
+    const root = document.currentScript.getRootNode();
+    const d = document;
+    const ogById = d.getElementById.bind(d);
+    const ogQS = d.querySelector.bind(d);
+    const ogQSA = d.querySelectorAll.bind(d);
+    const ogByClass = d.getElementsByClassName.bind(d);
+    const ogByTag = d.getElementsByTagName.bind(d);
+    const qFromRoot = (sel) => (root && root.querySelector) ? root.querySelector(sel) : null;
+    const qaFromRoot = (sel) => (root && root.querySelectorAll) ? root.querySelectorAll(sel) : [];
+    d.getElementById = (id) => (root && root.getElementById ? root.getElementById(id) : qFromRoot('#'+CSS.escape(id))) || ogById(id);
+    d.querySelector = (sel) => qFromRoot(sel) || ogQS(sel);
+    d.querySelectorAll = (sel) => {
+      const list = qaFromRoot(sel);
+      return (list && list.length) ? list : ogQSA(sel);
+    };
+    d.getElementsByClassName = (cls) => (root && root.getElementsByClassName ? root.getElementsByClassName(cls) : ogByClass(cls));
+    d.getElementsByTagName = (tag) => (root && root.getElementsByTagName ? root.getElementsByTagName(tag) : ogByTag(tag));
+    window.__SKURY_SHADOW_ROOT__ = root;
+  `;
+  const bootstrapBlob = new Blob([bootstrapCode], { type: 'module/javascript' });
+  bootstrap.src = URL.createObjectURL(bootstrapBlob);
+  shadow.appendChild(bootstrap);
 
-  // Extra guard: if the browser tries to focus the iframe on load, immediately blur it
-  skuryPanelIFrame.addEventListener('load', () => {
-    try {
-      // remove any autofocus attributes inside just in case
-      const doc = skuryPanelIFrame.contentDocument;
-      if (doc) {
-        const af = doc.querySelector('[autofocus]');
-        if (af) af.removeAttribute('autofocus');
-      }
-      // ensure the frame itself is not the active element
-      if (document.activeElement === skuryPanelIFrame) {
-        skuryPanelIFrame.blur();
-      }
-      // avoid pulling focus into the iframe's window
-      if (skuryPanelIFrame.contentWindow && skuryPanelIFrame.contentWindow.blur) {
-        skuryPanelIFrame.contentWindow.blur();
-      }
-    } catch (e) { /* no-op */ }
-  }, { once: true });
+  // Load sidebar.js and popup.js as module scripts inside shadow root
+  for (const scriptName of ['sidebar.js', 'popup.js']) {
+    const code = await fetch(chrome.runtime.getURL(scriptName)).then(r => r.text());
+    const blob = new Blob([code], { type: 'module/javascript' });
+    const url = URL.createObjectURL(blob);
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = url;
+    shadow.appendChild(script);
+  }
 
-  // Stop clicks inside the iframe from bubbling to a global backdrop handler
-  skuryPanelIFrame.addEventListener('mousedown', (e) => {
-    e.stopPropagation();
-  }, { passive: true });
+  // Add to page
+  document.body.appendChild(host);
+  skuryPanelHost = host;
+  console.log('Skury: Shadow DOM sidebar initialized');
 
-  // Append elements
-  document.body.appendChild(skuryBackdropEl);
-  document.body.appendChild(skuryPanelEl);
-
-  // Add a lightweight click-outside handler on the document (no full-screen overlay)
-  setTimeout(() => {
-    document.addEventListener('mousedown', _onDocumentMouseDown);
-    console.log('Skury: in-page sidebar initialized without focus capture');
-  }, 0);
-
-  // Apply initial theme to panel
+  // Apply initial theme to panel host
   try {
     chrome.storage.local.get(['skuryTheme'], (result) => {
       applyPanelTheme(result.skuryTheme);
     });
   } catch {}
 
-  return skuryPanelEl;
+  return host;
 }
 
 // helper to detect clicks outside the panel and close it
 function _onDocumentMouseDown(ev) {
   try {
-    const panel = document.getElementById('skuryPanel');
+    const panel = document.getElementById('skuryPanelHost');
     if (!panel || panel.style.display === 'none') return;
     if (panel.contains(ev.target)) return; // click inside panel; ignore
     toggleInPagePanel(false);
   } catch (e) { /* no-op */ }
 }
 
-function toggleInPagePanel(forceState) {
-  const panel = ensureInPagePanel();
+async function toggleInPagePanel(forceState) {
+  const panel = await ensureInPagePanel();
   const isOpen = panel.style.display !== 'none';
   const shouldOpen = typeof forceState === 'boolean' ? forceState : !isOpen;
-
-  if (shouldOpen) {
-    panel.style.display = 'block';
-    panel.classList.add('skury-open');
-    if (skuryBackdropEl) skuryBackdropEl.style.display = 'block';
-  } else {
-    panel.classList.remove('skury-open');
-    if (skuryBackdropEl) skuryBackdropEl.style.display = 'none';
-    setTimeout(() => { panel.style.display = 'none'; }, 360);
-  }
+  panel.style.display = shouldOpen ? 'block' : 'none';
 }
 
 function applyPanelTheme(theme) {
-  const panel = document.getElementById('skuryPanel');
+  const panel = document.getElementById('skuryPanelHost');
   if (!panel) return;
   panel.classList.remove('theme-dark', 'theme-light');
   panel.classList.add(`theme-${theme}`);
@@ -288,7 +248,8 @@ function applyPanelTheme(theme) {
 
 // Listen for Escape key to close the panel
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && skuryPanelEl && skuryPanelEl.style.display !== 'none') {
+  const host = document.getElementById('skuryPanelHost');
+  if (e.key === 'Escape' && host && host.style.display !== 'none') {
     toggleInPagePanel(false);
   }
 });
@@ -317,34 +278,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // Extract main text content from the page
     try {
       let content = '';
-      
       // Try to get main content area (common semantic elements)
       const mainSelectors = ['main', 'article', '[role="main"]', '.main-content', '#main-content', '#content'];
       let mainContent = null;
-      
       for (const selector of mainSelectors) {
         mainContent = document.querySelector(selector);
         if (mainContent) break;
       }
-      
       // If no main content found, use body
       const sourceElement = mainContent || document.body;
-      
       // Extract text, filtering out script/style tags
       const clone = sourceElement.cloneNode(true);
       const unwanted = clone.querySelectorAll('script, style, noscript, iframe, svg');
       unwanted.forEach(el => el.remove());
-      
       content = clone.innerText || clone.textContent || '';
-      
       // Clean up whitespace
       content = content.replace(/\s+/g, ' ').trim();
-      
       // Limit to ~10000 characters to avoid token limits
       if (content.length > 10000) {
         content = content.substring(0, 10000) + '... [content truncated]';
       }
-      
       if (content.length < 50) {
         sendResponse({ error: 'Page content is too short or empty' });
       } else {

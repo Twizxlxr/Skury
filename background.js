@@ -110,7 +110,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: false, error: 'Content script not available on this page.' });
         }
       }
-    })();
+    })().catch(err => {
+      console.error('toggleSidebar unexpected error:', err);
+      sendResponse({ success: false, error: err.message || 'Unknown error' });
+    });
     return true;
   }
   // === END OF UPDATED BLOCK ===
@@ -134,7 +137,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.warn('initiateSnip: failed to forward to tab', e);
         sendResponse({ success: false, error: e.message || 'Failed to initiate snip' });
       }
-    })();
+    })().catch(err => {
+      console.error('initiateSnip unexpected error:', err);
+      sendResponse({ success: false, error: err.message || 'Unknown error' });
+    });
     return true;
   }
 
@@ -160,7 +166,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } catch (e) {
         sendResponse({ isDark: true }); // default to dark
       }
-    })();
+    })().catch(() => {
+      sendResponse({ isDark: true }); // default to dark
+    });
     return true;
   }
 
@@ -186,7 +194,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } catch (e) {
         sendResponse({ error: e.message || 'Failed to read page' });
       }
-    })();
+    })().catch(err => {
+      sendResponse({ error: err.message || 'Unknown error' });
+    });
     return true;
   }
 
@@ -206,7 +216,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } catch (e) {
         sendResponse({ success: false, error: e.message || 'Failed to forward theme change' });
       }
-    })();
+    })().catch(err => {
+      sendResponse({ success: false, error: err.message || 'Unknown error' });
+    });
     return true;
   }
 
@@ -311,7 +323,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           error: error.message 
         });
       }
-    })();
+    })().catch(err => {
+      console.error("callGemini unexpected error:", err);
+      sendResponse({ error: err.message || 'Unknown error' });
+    });
     
     return true; // Indicates asynchronous response
   }

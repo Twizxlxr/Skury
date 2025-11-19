@@ -84,9 +84,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const initialTabId = sender?.tab?.id ?? null;
     (async () => {
       try {
-        const tabId = initialTabId ?? await new Promise((resolve) => {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id ?? null));
-        });
+        let tabId = initialTabId;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
         if (!tabId) {
           sendResponse({ success: false, error: 'No active tab to toggle panel.' });
           return;
@@ -123,9 +125,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       try {
         console.log('background: initiateSnip request received');
-        const tabId = sender?.tab?.id ?? await new Promise((resolve) => {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id ?? null));
-        });
+        let tabId = sender?.tab?.id;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
         if (!tabId) {
           sendResponse({ success: false, error: 'No active tab to initiate snip.' });
           return;
@@ -148,9 +152,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'getPageTheme') {
     (async () => {
       try {
-        const tabId = sender?.tab?.id ?? await new Promise((resolve) => {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id ?? null));
-        });
+        let tabId = sender?.tab?.id;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
         if (!tabId) {
           sendResponse({ isDark: true }); // default to dark
           return;
@@ -176,9 +182,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'readPage') {
     (async () => {
       try {
-        const tabId = sender?.tab?.id ?? await new Promise((resolve) => {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id ?? null));
-        });
+        let tabId = sender?.tab?.id;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
         if (!tabId) {
           sendResponse({ error: 'No active tab to read.' });
           return;
@@ -204,9 +212,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'themeChanged') {
     (async () => {
       try {
-        const tabId = sender?.tab?.id ?? await new Promise((resolve) => {
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id ?? null));
-        });
+        let tabId = sender?.tab?.id;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
         if (!tabId) {
           sendResponse({ success: false, error: 'No active tab to apply theme.' });
           return;
@@ -282,7 +292,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const response = await fetch(`${API_URL}?key=${apiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts }] })
+          body: JSON.stringify({ 
+            contents: [{ parts }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 1024,
+              topP: 0.95,
+              topK: 40
+            }
+          })
         });
 
         if (!response.ok) {

@@ -180,12 +180,12 @@ async function ensureInPagePanel() {
   });
   skuryIframe.setAttribute('tabindex', '-1');
 
-  // Auto-restore main tab focus if iframe ever becomes active
+  // Auto-restore main tab focus if iframe ever becomes active (optimized with 200ms interval)
   setInterval(() => {
     if (document.activeElement === skuryIframe) {
       try { focusProxy.focus(); } catch (_) {}
     }
-  }, 100);
+  }, 200);
 
   skuryPanel.appendChild(skuryIframe);
   document.body.appendChild(skuryPanel);
@@ -212,14 +212,21 @@ async function toggleInPagePanel(forceState) {
 
   if (shouldOpen) {
     panel.style.display = 'block';
+    // Use will-change for smoother animations
+    panel.style.willChange = 'transform, opacity';
     requestAnimationFrame(() => {
-      panel.style.transform = 'translateX(0)';
-      panel.style.opacity = '1';
+      requestAnimationFrame(() => {
+        panel.style.transform = 'translateX(0)';
+        panel.style.opacity = '1';
+      });
     });
   } else {
     panel.style.transform = 'translateX(100%)';
     panel.style.opacity = '0';
-    setTimeout(() => (panel.style.display = 'none'), 300);
+    setTimeout(() => {
+      panel.style.display = 'none';
+      panel.style.willChange = 'auto'; // Release GPU resources
+    }, 300);
   }
 }
 
@@ -401,7 +408,7 @@ async function captureArea(rect) {
       Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height),
       0, 0, crop.width, crop.height
     );
-    return crop.toDataURL('image/png');
+    return crop.toDataURL('image/jpeg', 0.85); // Use JPEG with 85% quality for smaller file size
   } else {
     // Fallback: ask background to capture tab
     return new Promise(resolve => {
@@ -425,7 +432,7 @@ async function captureArea(rect) {
             crop.height = Math.max(1, Math.round(rect.height));
             const ctx = crop.getContext('2d');
             ctx.drawImage(img, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
-            resolve(crop.toDataURL('image/png'));
+            resolve(crop.toDataURL('image/jpeg', 0.85)); // Use JPEG for faster transfer
           };
           img.onerror = () => resolve(null);
           img.src = resp.dataUrl;

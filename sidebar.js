@@ -167,7 +167,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
       const maxChars = 20000;
-      const maxImageBytes = 2 * 1024 * 1024; // 2MB
+      const maxImageBytes = 1 * 1024 * 1024; // 1MB for faster uploads
 
       const mime = (file.type || '').toLowerCase();
       const isTextLike = /^text\//.test(mime) || /(json|javascript|csv|markdown|xml)/.test(mime) || /\.(txt|md|json|csv|log|html?|js|ts|tsx|py|java|c(pp)?|cs|rb|go)$/i.test(file.name);
@@ -183,7 +183,31 @@ document.addEventListener("DOMContentLoaded", () => {
         const reader = new FileReader();
         reader.onerror = () => addMessageToChat('Gemini', `Error reading image: ${file.name}`);
         reader.onload = () => {
-          const dataUrl = reader.result;
+          let dataUrl = reader.result;
+          // Compress image if over 500KB
+          if (dataUrl.length > 500 * 1024) {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              const maxDim = 1920;
+              let w = img.width, h = img.height;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) { h = (h / w) * maxDim; w = maxDim; }
+                else { w = (w / h) * maxDim; h = maxDim; }
+              }
+              canvas.width = w; canvas.height = h;
+              ctx.drawImage(img, 0, 0, w, h);
+              dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              sendImageToChat(dataUrl, file.name);
+            };
+            img.src = dataUrl;
+            return;
+          }
+          sendImageToChat(dataUrl, file.name);
+        };
+        
+        function sendImageToChat(dataUrl, fileName) {
           // Show preview message
           const imgMsg = document.createElement('div');
           imgMsg.className = 'chat-message you';
@@ -193,7 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
           chatOutput.appendChild(imgMsg);
 
           const userPrompt = chatInput.value.trim();
-          const effectivePrompt = userPrompt || `Describe and analyze this image (${file.name}).`;
+          const effectivePrompt = userPrompt || `Describe and analyze this image (${fileName}).`;
           chatInput.value = '';
           const loadingMsg = addMessageToChat('Gemini', 'Analyzing image...');
           chrome.runtime.sendMessage({ type: 'callGemini', prompt: effectivePrompt, imageData: dataUrl }, (resp) => {
@@ -206,7 +230,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             chatOutput.scrollTop = chatOutput.scrollHeight;
           });
-        };
+        }
         reader.readAsDataURL(file);
         return;
       }

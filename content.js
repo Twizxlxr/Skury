@@ -203,6 +203,8 @@ function _onDocumentMouseDown(ev) {
     if (panel.contains(ev.target)) return; // click inside panel; ignore
     const bubble = document.getElementById('aiBubble');
     if (bubble && bubble.contains(ev.target)) return; // click on bubble; ignore
+    // Don't close if snip overlay is active
+    if (snipOverlay && document.body.contains(snipOverlay)) return;
     toggleInPagePanel(false);
   } catch (e) { /* no-op */ }
 }

@@ -198,9 +198,11 @@ async function ensureInPagePanel() {
 // helper to detect clicks outside the panel and close it
 function _onDocumentMouseDown(ev) {
   try {
-    const panel = document.getElementById('skuryPanelHost');
+    const panel = document.getElementById('skuryPanel');
     if (!panel || panel.style.display === 'none') return;
     if (panel.contains(ev.target)) return; // click inside panel; ignore
+    const bubble = document.getElementById('aiBubble');
+    if (bubble && bubble.contains(ev.target)) return; // click on bubble; ignore
     toggleInPagePanel(false);
   } catch (e) { /* no-op */ }
 }
@@ -220,6 +222,8 @@ async function toggleInPagePanel(forceState) {
         panel.style.opacity = '1';
       });
     });
+    // Add click-outside listener when panel opens
+    setTimeout(() => document.addEventListener('mousedown', _onDocumentMouseDown), 100);
   } else {
     panel.style.transform = 'translateX(100%)';
     panel.style.opacity = '0';
@@ -227,6 +231,8 @@ async function toggleInPagePanel(forceState) {
       panel.style.display = 'none';
       panel.style.willChange = 'auto'; // Release GPU resources
     }, 300);
+    // Remove click-outside listener when panel closes
+    document.removeEventListener('mousedown', _onDocumentMouseDown);
   }
 }
 
@@ -239,8 +245,8 @@ function applyPanelTheme(theme) {
 
 // Listen for Escape key to close the panel
 document.addEventListener('keydown', (e) => {
-  const host = document.getElementById('skuryPanelHost');
-  if (e.key === 'Escape' && host && host.style.display !== 'none') {
+  const panel = document.getElementById('skuryPanel');
+  if (e.key === 'Escape' && panel && panel.style.display !== 'none') {
     toggleInPagePanel(false);
   }
 });

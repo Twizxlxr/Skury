@@ -590,15 +590,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 let gformExtractedData = null;
 let tesseractReady = false;
 
-// Load Tesseract.js from CDN
+// Load Tesseract.js from CDN (dynamically injected into page context, not extension)
 function loadTesseract() {
   return new Promise((resolve, reject) => {
     if (window.Tesseract) { resolve(); return; }
+    
+    // Inject script into page context (bypasses extension CSP)
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js';
-    script.onload = () => { tesseractReady = true; resolve(); };
-    script.onerror = () => reject(new Error('Failed to load Tesseract.js'));
-    document.head.appendChild(script);
+    script.onload = () => { 
+      tesseractReady = true; 
+      resolve(); 
+    };
+    script.onerror = () => reject(new Error('Failed to load Tesseract.js from CDN'));
+    (document.head || document.documentElement).appendChild(script);
   });
 }
 

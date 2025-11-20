@@ -548,7 +548,13 @@ async function solveFormWorkflow(sendResponse) {
       const reply = await new Promise((resolve) => {
         safeSendMessage({ type: 'callGemini', prompt }, (resp) => resolve(resp));
       });
-      const letter = reply && reply.reply ? reply.reply.trim().charAt(0).toUpperCase() : null;
+      // Robust letter extraction A-H
+      let letter = null;
+      if (reply && reply.reply) {
+        const text = reply.reply.trim();
+        const m = text.match(/\b([A-H])\b/i) || text.match(/^(?:Option\s*)?([A-H])(?=\b)/i);
+        if (m) letter = m[1].toUpperCase();
+      }
       const idx = letter ? letters.indexOf(letter) : -1;
       if (idx >= 0 && q.options[idx]) {
         addMarker(q.options[idx].input);

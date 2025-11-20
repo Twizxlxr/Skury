@@ -148,6 +148,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // Forward form solving request to content script
+  if (request.type === 'solveForm') {
+    (async () => {
+      try {
+        let tabId = sender?.tab?.id;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
+        if (!tabId) {
+          sendResponse({ error: 'No active tab to solve form.' });
+          return;
+        }
+        chrome.tabs.sendMessage(tabId, { type: 'solveForm' }, (response) => {
+          if (chrome.runtime.lastError) {
+            // attempt injection then retry once
+            ensureContentInjected(tabId).then(() => {
+              chrome.tabs.sendMessage(tabId, { type: 'solveForm' }, (resp2) => {
+                if (chrome.runtime.lastError) {
+                  sendResponse({ error: 'Content script unavailable for form solving.' });
+                } else {
+                  sendResponse(resp2 || { error: 'No response from form solver.' });
+                }
+              });
+            }).catch(() => {
+              sendResponse({ error: 'Cannot inject content script to solve form.' });
+            });
+          } else {
+            sendResponse(response || { error: 'No response from form solver.' });
+          }
+        });
+      } catch (e) {
+        sendResponse({ error: e.message || 'Failed to forward form solve request.' });
+      }
+    })().catch(err => {
+      sendResponse({ error: err.message || 'Unknown error' });
+    });
+    return true;
+  }
+
   // Handle theme detection request from sidebar
   if (request.type === 'getPageTheme') {
     (async () => {

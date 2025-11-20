@@ -622,29 +622,58 @@ async function analyzeGoogleForm(sendResponse) {
     }
 
     const questions = [];
-    // Google Forms structure: questions are in divs with role="listitem" or specific classes
-    const questionContainers = Array.from(document.querySelectorAll('[role="listitem"], .freebirdFormviewerViewItemsItemItem'));
+    // Google Forms structure: Use multiple strategies to find questions
+    let questionContainers = Array.from(document.querySelectorAll('[role="listitem"]'));
+    
+    // Fallback: look for divs containing radio/checkbox groups
+    if (questionContainers.length === 0) {
+      const allRadios = document.querySelectorAll('input[type="radio"]');
+      const allCheckboxes = document.querySelectorAll('input[type="checkbox"]');
+      const containers = new Set();
+      [...allRadios, ...allCheckboxes].forEach(inp => {
+        // Find parent container (usually 2-4 levels up)
+        let parent = inp.parentElement;
+        for (let i = 0; i < 5 && parent; i++) {
+          if (parent.tagName === 'DIV' && parent.querySelectorAll('input[type="radio"], input[type="checkbox"]').length >= 2) {
+            containers.add(parent);
+            break;
+          }
+          parent = parent.parentElement;
+        }
+      });
+      questionContainers = Array.from(containers);
+    }
+    
+    console.log('Skury: Found', questionContainers.length, 'question containers');
     
     for (let i = 0; i < questionContainers.length; i++) {
       const container = questionContainers[i];
       const qData = { id: `q${i}`, questionText: '', options: [], meta: { type: 'unknown', required: false, rawDom: container } };
 
-      // Extract question text
-      const questionTextEl = container.querySelector('[role="heading"], .freebirdFormviewerComponentsQuestionBaseTitle');
-      if (questionTextEl) {
+      // Extract question text - try multiple selectors
+      let questionTextEl = container.querySelector('[role="heading"]');
+      if (!questionTextEl) {
+        questionTextEl = container.querySelector('[jsname], div[class*="question"], div[class*="Question"]');
+      }
+      if (!questionTextEl) {
+        // Find first text node with substantial content
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        let node;
+        while (node = walker.nextNode()) {
+          const text = node.textContent.trim();
+          if (text.length > 10 && !text.match(/^[A-D]\)/) && node.parentElement.tagName !== 'LABEL') {
+            qData.questionText = text.slice(0, 500);
+            break;
+          }
+        }
+      } else {
         qData.questionText = questionTextEl.innerText.trim().replace(/^\d+\.\s*/, '').slice(0, 500);
       }
 
-      // Check for images in question
+      // Check for images in question (skip OCR for now for speed)
       const qImages = container.querySelectorAll('img');
-      for (const img of qImages) {
-        if (!img.src || img.src.includes('icon')) continue;
-        try {
-          const { data: { text } } = await window.Tesseract.recognize(img.src, 'eng');
-          if (text.trim()) qData.questionText += ` [IMG: ${text.trim().slice(0, 200)}]`;
-        } catch (e) {
-          qData.questionText += ' [IMG: OCR failed]';
-        }
+      if (qImages.length > 0) {
+        qData.questionText += ` [${qImages.length} image(s)]`;
       }
 
       // Detect question type and extract options
@@ -655,37 +684,63 @@ async function analyzeGoogleForm(sendResponse) {
         qData.meta.type = 'radio';
         for (const radio of radioInputs) {
           const optData = { id: radio.id || `opt${qData.options.length}`, text: '', imageText: '', element: radio };
-          const label = radio.closest('label') || radio.parentElement.querySelector('label');
-          if (label) optData.text = label.innerText.trim().slice(0, 300);
           
-          // Check for images in option
-          const optImg = label?.querySelector('img') || radio.parentElement.querySelector('img');
-          if (optImg && optImg.src && !optImg.src.includes('icon')) {
-            try {
-              const { data: { text } } = await window.Tesseract.recognize(optImg.src, 'eng');
-              optData.imageText = text.trim().slice(0, 200);
-            } catch (e) {
-              optData.imageText = 'OCR failed';
+          // Try multiple ways to find label text
+          let labelText = '';
+          const label = radio.closest('label');
+          if (label) {
+            labelText = label.innerText.trim();
+          } else {
+            // Look for adjacent text node or span
+            let sibling = radio.nextSibling;
+            while (sibling && !labelText) {
+              if (sibling.nodeType === Node.TEXT_NODE) {
+                labelText = sibling.textContent.trim();
+              } else if (sibling.nodeType === Node.ELEMENT_NODE) {
+                labelText = sibling.innerText?.trim() || '';
+                if (labelText) break;
+              }
+              sibling = sibling.nextSibling;
+            }
+            // Fallback: look at parent's text
+            if (!labelText) {
+              labelText = radio.parentElement?.innerText?.trim() || '';
             }
           }
+          
+          optData.text = labelText.slice(0, 300);
+          if (!optData.text) optData.text = `Option ${qData.options.length + 1}`;
           qData.options.push(optData);
         }
       } else if (checkboxInputs.length > 0) {
         qData.meta.type = 'checkbox';
         for (const checkbox of checkboxInputs) {
           const optData = { id: checkbox.id || `opt${qData.options.length}`, text: '', imageText: '', element: checkbox };
-          const label = checkbox.closest('label') || checkbox.parentElement.querySelector('label');
-          if (label) optData.text = label.innerText.trim().slice(0, 300);
           
-          const optImg = label?.querySelector('img') || checkbox.parentElement.querySelector('img');
-          if (optImg && optImg.src && !optImg.src.includes('icon')) {
-            try {
-              const { data: { text } } = await window.Tesseract.recognize(optImg.src, 'eng');
-              optData.imageText = text.trim().slice(0, 200);
-            } catch (e) {
-              optData.imageText = 'OCR failed';
+          let labelText = '';
+          const label = checkbox.closest('label');
+          if (label) {
+            labelText = label.innerText.trim();
+          } else {
+            let sibling = checkbox.nextSibling;
+            while (sibling && !labelText) {
+              if (sibling.nodeType === Node.TEXT_NODE) {
+                labelText = sibling.textContent.trim();
+              } else if (sibling.nodeType === Node.ELEMENT_NODE) {
+                labelText = sibling.innerText?.trim() || '';
+                if (labelText) break;
+              }
+              sibling = sibling.nextSibling;
+            }
+            if (!labelText) {
+              labelText = checkbox.parentElement?.innerText?.trim() || '';
             }
           }
+          
+          optData.text = labelText.slice(0, 300);
+          if (!optData.text) optData.text = `Option ${qData.options.length + 1}`;
+          
+          // Skip OCR for images to improve speed
           qData.options.push(optData);
         }
       }
@@ -695,9 +750,17 @@ async function analyzeGoogleForm(sendResponse) {
         qData.meta.required = true;
       }
 
-      if (qData.options.length > 0) {
+      // Only add if we found both question text and options
+      if (qData.options.length > 0 && qData.questionText) {
         questions.push(qData);
       }
+    }
+
+    console.log('Skury: Extracted', questions.length, 'questions');
+    
+    if (questions.length === 0) {
+      sendResponse({ error: 'No form questions detected. Make sure the form is fully loaded.' });
+      return;
     }
 
     gformExtractedData = questions;

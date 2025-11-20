@@ -572,4 +572,181 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     solveFormWorkflow(sendResponse);
     return true; // async
   }
+  if (msg && msg.type === 'analyzeGoogleForm') {
+    analyzeGoogleForm(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'revealHint') {
+    revealHint(msg.questionId, msg.optionId);
+    sendResponse({ success: true });
+  }
+  if (msg && msg.type === 'cleanupHints') {
+    cleanupAllHints();
+    sendResponse({ success: true });
+  }
 });
+
+// === Google Form Solver with OCR ===
+let gformExtractedData = null;
+let tesseractReady = false;
+
+// Load Tesseract.js from CDN
+function loadTesseract() {
+  return new Promise((resolve, reject) => {
+    if (window.Tesseract) { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js';
+    script.onload = () => { tesseractReady = true; resolve(); };
+    script.onerror = () => reject(new Error('Failed to load Tesseract.js'));
+    document.head.appendChild(script);
+  });
+}
+
+// Analyze Google Form: extract questions, options, run OCR on images
+async function analyzeGoogleForm(sendResponse) {
+  try {
+    // Check if on Google Forms
+    if (!window.location.hostname.includes('docs.google.com')) {
+      sendResponse({ error: 'Not on a Google Form page.' });
+      return;
+    }
+
+    // Load Tesseract if needed
+    if (!tesseractReady) {
+      await loadTesseract();
+    }
+
+    const questions = [];
+    // Google Forms structure: questions are in divs with role="listitem" or specific classes
+    const questionContainers = Array.from(document.querySelectorAll('[role="listitem"], .freebirdFormviewerViewItemsItemItem'));
+    
+    for (let i = 0; i < questionContainers.length; i++) {
+      const container = questionContainers[i];
+      const qData = { id: `q${i}`, questionText: '', options: [], meta: { type: 'unknown', required: false, rawDom: container } };
+
+      // Extract question text
+      const questionTextEl = container.querySelector('[role="heading"], .freebirdFormviewerComponentsQuestionBaseTitle');
+      if (questionTextEl) {
+        qData.questionText = questionTextEl.innerText.trim().replace(/^\d+\.\s*/, '').slice(0, 500);
+      }
+
+      // Check for images in question
+      const qImages = container.querySelectorAll('img');
+      for (const img of qImages) {
+        if (!img.src || img.src.includes('icon')) continue;
+        try {
+          const { data: { text } } = await window.Tesseract.recognize(img.src, 'eng');
+          if (text.trim()) qData.questionText += ` [IMG: ${text.trim().slice(0, 200)}]`;
+        } catch (e) {
+          qData.questionText += ' [IMG: OCR failed]';
+        }
+      }
+
+      // Detect question type and extract options
+      const radioInputs = container.querySelectorAll('input[type="radio"]');
+      const checkboxInputs = container.querySelectorAll('input[type="checkbox"]');
+      
+      if (radioInputs.length > 0) {
+        qData.meta.type = 'radio';
+        for (const radio of radioInputs) {
+          const optData = { id: radio.id || `opt${qData.options.length}`, text: '', imageText: '', element: radio };
+          const label = radio.closest('label') || radio.parentElement.querySelector('label');
+          if (label) optData.text = label.innerText.trim().slice(0, 300);
+          
+          // Check for images in option
+          const optImg = label?.querySelector('img') || radio.parentElement.querySelector('img');
+          if (optImg && optImg.src && !optImg.src.includes('icon')) {
+            try {
+              const { data: { text } } = await window.Tesseract.recognize(optImg.src, 'eng');
+              optData.imageText = text.trim().slice(0, 200);
+            } catch (e) {
+              optData.imageText = 'OCR failed';
+            }
+          }
+          qData.options.push(optData);
+        }
+      } else if (checkboxInputs.length > 0) {
+        qData.meta.type = 'checkbox';
+        for (const checkbox of checkboxInputs) {
+          const optData = { id: checkbox.id || `opt${qData.options.length}`, text: '', imageText: '', element: checkbox };
+          const label = checkbox.closest('label') || checkbox.parentElement.querySelector('label');
+          if (label) optData.text = label.innerText.trim().slice(0, 300);
+          
+          const optImg = label?.querySelector('img') || checkbox.parentElement.querySelector('img');
+          if (optImg && optImg.src && !optImg.src.includes('icon')) {
+            try {
+              const { data: { text } } = await window.Tesseract.recognize(optImg.src, 'eng');
+              optData.imageText = text.trim().slice(0, 200);
+            } catch (e) {
+              optData.imageText = 'OCR failed';
+            }
+          }
+          qData.options.push(optData);
+        }
+      }
+
+      // Check if required
+      if (container.querySelector('[aria-required="true"]') || container.innerText.includes('*')) {
+        qData.meta.required = true;
+      }
+
+      if (qData.options.length > 0) {
+        questions.push(qData);
+      }
+    }
+
+    gformExtractedData = questions;
+    sendResponse({ success: true, questions: questions.map(q => ({
+      id: q.id,
+      questionText: q.questionText,
+      options: q.options.map(o => ({ id: o.id, text: o.text, imageText: o.imageText })),
+      meta: { type: q.meta.type, required: q.meta.required }
+    })) });
+  } catch (error) {
+    console.error('analyzeGoogleForm error:', error);
+    sendResponse({ error: error.message || 'Failed to analyze form' });
+  }
+}
+
+// Reveal hint: inject subtle marker beside the option
+function revealHint(questionId, optionId) {
+  try {
+    if (!gformExtractedData) return;
+    const question = gformExtractedData.find(q => q.id === questionId);
+    if (!question) return;
+    const option = question.options.find(o => o.id === optionId);
+    if (!option || !option.element) return;
+
+    // Find label to attach marker
+    const labelNode = option.element.closest('label') || option.element.parentElement;
+    if (!labelNode) return;
+
+    // Check if marker already exists
+    if (labelNode.querySelector('.skury-hint-dot')) return;
+
+    // Create marker
+    const marker = document.createElement('span');
+    marker.className = 'skury-hint-dot';
+    marker.setAttribute('aria-hidden', 'true');
+    marker.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(139,92,246,0.85);margin-left:8px;opacity:0.85;pointer-events:none;vertical-align:middle;';
+    labelNode.appendChild(marker);
+
+    // Remove marker when option is selected
+    const removeMarker = () => {
+      if (marker.isConnected) marker.remove();
+    };
+    option.element.addEventListener('change', removeMarker, { once: true });
+    option.element.addEventListener('click', removeMarker, { once: true });
+  } catch (e) {
+    console.warn('revealHint error:', e);
+  }
+}
+
+// Cleanup all hint markers
+function cleanupAllHints() {
+  try {
+    document.querySelectorAll('.skury-hint-dot').forEach(marker => marker.remove());
+  } catch (e) {
+    console.warn('cleanupAllHints error:', e);
+  }
+}

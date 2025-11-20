@@ -149,20 +149,174 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (solveFormBtn) {
     solveFormBtn.addEventListener('click', () => {
-      const loadingMsg = addMessageToChat('Gemini', 'Scanning form and solving...');
-      chrome.runtime.sendMessage({ type: 'solveForm' }, (resp) => {
-        if (!resp) {
-          loadingMsg.innerHTML = '<strong>Error:</strong> No response';
-        } else if (resp.error) {
-          loadingMsg.innerHTML = `<strong>Error:</strong> ${resp.error}`;
-        } else if (resp.solved) {
-          loadingMsg.innerHTML = `<strong>Gemini:</strong> Solved ${resp.count} questions.`;
-        } else {
-          loadingMsg.innerHTML = `<strong>Gemini:</strong> ${resp.message || 'Completed.'}`;
-        }
-        chatOutput.scrollTop = chatOutput.scrollHeight;
+      // Check if on Google Form
+      if (!window.location.hostname.includes('docs.google.com')) {
+        // Old simple solve for non-Google forms
+        const loadingMsg = addMessageToChat('Gemini', 'Scanning form and solving...');
+        chrome.runtime.sendMessage({ type: 'solveForm' }, (resp) => {
+          if (!resp) {
+            loadingMsg.innerHTML = '<strong>Error:</strong> No response';
+          } else if (resp.error) {
+            loadingMsg.innerHTML = `<strong>Error:</strong> ${resp.error}`;
+          } else if (resp.solved) {
+            loadingMsg.innerHTML = `<strong>Gemini:</strong> Solved ${resp.count} questions.`;
+          } else {
+            loadingMsg.innerHTML = `<strong>Gemini:</strong> ${resp.message || 'Completed.'}`;
+          }
+          chatOutput.scrollTop = chatOutput.scrollHeight;
+        });
+      } else {
+        // Google Form Solver with OCR
+        showGoogleFormSolver();
+      }
+    });
+  }
+  
+  // === Google Form Solver UI ===
+  let gformData = null;
+  
+  function showGoogleFormSolver() {
+    // Clear chat and show analyzing message
+    chatOutput.innerHTML = '';
+    const loadingMsg = addMessageToChat('Skury', 'Analyzing Google Form (OCR in progress)...');
+    
+    chrome.runtime.sendMessage({ type: 'analyzeGoogleForm' }, (resp) => {
+      if (!resp || resp.error) {
+        loadingMsg.innerHTML = `<strong>Error:</strong> ${resp?.error || 'Failed to analyze form'}`;
+        return;
+      }
+      
+      gformData = resp.questions;
+      loadingMsg.remove();
+      
+      // Display form analysis UI
+      const solverContainer = document.createElement('div');
+      solverContainer.className = 'gform-solver-container';
+      solverContainer.innerHTML = `
+        <div class="gform-header">
+          <h3>Google Form Solver</h3>
+          <button class="gform-btn-clear" id="gformClearBtn" title="Clear all hints">Clear Hints</button>
+        </div>
+        <div class="gform-questions" id="gformQuestions"></div>
+      `;
+      chatOutput.appendChild(solverContainer);
+      
+      const questionsDiv = document.getElementById('gformQuestions');
+      gformData.forEach((q, idx) => {
+        const qEl = document.createElement('div');
+        qEl.className = 'gform-question';
+        qEl.setAttribute('role', 'region');
+        qEl.setAttribute('aria-label', `Question ${idx + 1}`);
+        
+        let qHtml = `<div class="gform-q-text"><strong>Q${idx + 1}:</strong> ${escapeHtml(q.questionText)}</div>`;
+        qHtml += `<div class="gform-options">`;
+        
+        q.options.forEach((opt, optIdx) => {
+          const letters = 'ABCDEFGH';
+          const optText = opt.text || '[No text]';
+          const imgText = opt.imageText ? ` <em>[Img: ${escapeHtml(opt.imageText.slice(0,50))}]</em>` : '';
+          qHtml += `
+            <div class="gform-option" data-qid="${q.id}" data-optid="${opt.id}">
+              <span class="gform-opt-letter">${letters[optIdx]}</span>
+              <span class="gform-opt-text">${escapeHtml(optText)}${imgText}</span>
+              <button class="gform-reveal-btn" data-qid="${q.id}" data-optid="${opt.id}" aria-label="Reveal hint for option ${letters[optIdx]}">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+              </button>
+            </div>
+          `;
+        });
+        
+        qHtml += `</div>`;
+        qHtml += `<button class="gform-suggest-btn" data-qid="${q.id}">Suggest Answer</button>`;
+        qEl.innerHTML = qHtml;
+        questionsDiv.appendChild(qEl);
+      });
+      
+      // Wire up suggest buttons
+      document.querySelectorAll('.gform-suggest-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const qid = btn.getAttribute('data-qid');
+          suggestAnswerForQuestion(qid);
+        });
+      });
+      
+      // Wire up reveal buttons
+      document.querySelectorAll('.gform-reveal-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const qid = btn.getAttribute('data-qid');
+          const optid = btn.getAttribute('data-optid');
+          revealHintForOption(qid, optid);
+          btn.style.opacity = '0.3';
+          btn.disabled = true;
+        });
+      });
+      
+      // Wire up clear button
+      document.getElementById('gformClearBtn')?.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'cleanupHints' });
+        document.querySelectorAll('.gform-reveal-btn').forEach(b => {
+          b.style.opacity = '1';
+          b.disabled = false;
+        });
       });
     });
+  }
+  
+  function suggestAnswerForQuestion(qid) {
+    const question = gformData?.find(q => q.id === qid);
+    if (!question) return;
+    
+    const btn = document.querySelector(`.gform-suggest-btn[data-qid="${qid}"]`);
+    if (btn) {
+      btn.textContent = 'Suggesting...';
+      btn.disabled = true;
+    }
+    
+    chrome.runtime.sendMessage({ 
+      type: 'suggestAnswer', 
+      questionText: question.questionText, 
+      options: question.options 
+    }, (resp) => {
+      if (btn) {
+        btn.textContent = 'Suggest Answer';
+        btn.disabled = false;
+      }
+      
+      if (!resp || resp.error) {
+        alert(`Error: ${resp?.error || 'No response'}`);
+        return;
+      }
+      
+      if (resp.optionIndex >= 0 && resp.optionIndex < question.options.length) {
+        const suggestedOpt = question.options[resp.optionIndex];
+        const optEl = document.querySelector(`.gform-option[data-qid="${qid}"][data-optid="${suggestedOpt.id}"]`);
+        if (optEl) {
+          optEl.style.background = 'rgba(139,92,246,0.15)';
+          optEl.style.borderLeft = '3px solid rgba(139,92,246,0.7)';
+        }
+        // Auto-reveal hint
+        revealHintForOption(qid, suggestedOpt.id);
+        const revealBtn = document.querySelector(`.gform-reveal-btn[data-qid="${qid}"][data-optid="${suggestedOpt.id}"]`);
+        if (revealBtn) {
+          revealBtn.style.opacity = '0.3';
+          revealBtn.disabled = true;
+        }
+      }
+    });
+  }
+  
+  function revealHintForOption(qid, optid) {
+    chrome.runtime.sendMessage({ type: 'revealHint', questionId: qid, optionId: optid });
+  }
+  
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
   if (snipBtn) {
     snipBtn.addEventListener('click', () => {

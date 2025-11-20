@@ -405,6 +405,123 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
   }
+
+  // === Google Form Solver: Analyze request ===
+  if (request.type === 'analyzeGoogleForm') {
+    (async () => {
+      try {
+        let tabId = sender?.tab?.id;
+        if (!tabId) {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = tabs?.[0]?.id ?? null;
+        }
+        if (!tabId) {
+          sendResponse({ error: 'No active tab to analyze form.' });
+          return;
+        }
+        // Forward to content script
+        chrome.tabs.sendMessage(tabId, { type: 'analyzeGoogleForm' }, (response) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ error: 'Failed to analyze form. Make sure you are on a Google Form.' });
+          } else {
+            sendResponse(response || { error: 'No data received from content script.' });
+          }
+        });
+      } catch (e) {
+        sendResponse({ error: e.message || 'Failed to analyze Google Form' });
+      }
+    })().catch(err => {
+      sendResponse({ error: err.message || 'Unknown error' });
+    });
+    return true;
+  }
+
+  // === Google Form Solver: Suggest answer for a question ===
+  if (request.type === 'suggestAnswer') {
+    (async () => {
+      try {
+        const { questionText, options } = request;
+        if (!questionText || !options || !Array.isArray(options)) {
+          sendResponse({ error: 'Invalid request: questionText and options required.' });
+          return;
+        }
+
+        // Build prompt for AI
+        let prompt = `Question: ${questionText}\nOptions:\n`;
+        const letters = 'ABCDEFGH';
+        options.forEach((opt, idx) => {
+          const optText = opt.text || '';
+          const imgText = opt.imageText ? ` [Image: ${opt.imageText}]` : '';
+          prompt += `${letters[idx]}) ${optText}${imgText}\n`;
+        });
+        prompt += `\nReturn ONLY the single best option letter (A-H).`;
+
+        // Call AI via existing callGemini logic
+        // TODO: Replace with dedicated callAI() if needed
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+        const result = await chrome.storage.local.get(['geminiApiKey']);
+        const apiKey = result.geminiApiKey;
+
+        if (!apiKey) {
+          sendResponse({ 
+            error: "Please set your Gemini API key using:\nawait chrome.storage.local.set({geminiApiKey: 'YOUR-API-KEY'})" 
+          });
+          return;
+        }
+
+        const parts = [{ text: prompt }];
+        const response = await fetch(`${API_URL}?key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            contents: [{ parts }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 512,
+              topP: 0.95,
+              topK: 40
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(`API Error (${response.status}): ${errorData.error?.message || 'Unknown error'}`);
+        }
+
+        const data = await response.json();
+        if (!data.candidates || data.candidates.length === 0) {
+          throw new Error("No content returned from API.");
+        }
+
+        const cand = data.candidates[0];
+        const replyText = (cand.content?.parts || [])
+          .map(p => p.text || "")
+          .join("\n")
+          .trim();
+
+        // Extract letter A-H
+        const m = replyText.match(/\b([A-H])\b/i) || replyText.match(/^(?:Option\s*)?([A-H])(?=\b)/i);
+        const letter = m ? m[1].toUpperCase() : null;
+        const optionIndex = letter ? letters.indexOf(letter) : -1;
+
+        sendResponse({ 
+          optionIndex, 
+          optionLetter: letter,
+          explanation: replyText,
+          confidence: optionIndex >= 0 ? 0.85 : 0.5
+        });
+
+      } catch (error) {
+        console.error("suggestAnswer error:", error);
+        sendResponse({ error: error.message });
+      }
+    })().catch(err => {
+      console.error("suggestAnswer unexpected error:", err);
+      sendResponse({ error: err.message || 'Unknown error' });
+    });
+    return true;
+  }
 });
 
 // Helper: attempt to inject our content script and CSS into the tab if allowed

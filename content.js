@@ -456,3 +456,114 @@ async function captureArea(rect) {
     });
   }
 }
+
+// === Google Form Solver ===
+// Collect candidate question groups (radio/checkbox sets)
+function collectFormQuestions() {
+  const questions = [];
+  // Strategy: find containers that hold multiple radio/checkbox inputs
+  const inputs = Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"]'));
+  const groupsByName = new Map();
+  for (const inp of inputs) {
+    const name = inp.name || ('__chk_' + Math.random());
+    if (!groupsByName.has(name)) groupsByName.set(name, []);
+    groupsByName.get(name).push(inp);
+  }
+  for (const [name, groupInputs] of groupsByName.entries()) {
+    if (groupInputs.length < 2) continue; // need at least 2 options
+    // Attempt to locate question text: look upward for text nodes or heading-like elements
+    let questionText = '';
+    const first = groupInputs[0];
+    let container = first.closest('.freebirdFormviewerViewItemsItemItem') || first.closest('div');
+    if (container) {
+      // gather text excluding labels of options
+      const cloned = container.cloneNode(true);
+      cloned.querySelectorAll('input, label, button').forEach(el => el.remove());
+      questionText = (cloned.innerText || '').trim().replace(/\s+/g, ' ');
+    }
+    if (!questionText) {
+      // fallback: previous sibling text
+      const prev = first.parentElement && first.parentElement.previousElementSibling;
+      if (prev) questionText = (prev.innerText || '').trim();
+    }
+    if (!questionText) questionText = 'Question';
+    // Collect option texts/images
+    const options = groupInputs.map((inp) => {
+      let labelText = '';
+      let labelNode = inp.closest('label') || inp.parentElement;
+      if (labelNode) {
+        // Prefer explicit text
+        labelText = (labelNode.innerText || '').trim().replace(/\s+/g, ' ');
+        // Remove questionText overlap
+        if (questionText && labelText === questionText) labelText = '';
+        // If empty and contains image, mark
+        const img = labelNode.querySelector('img');
+        if (!labelText && img) {
+          labelText = '[image option]';
+        }
+      }
+      if (!labelText) labelText = 'Option';
+      return { input: inp, label: labelText.slice(0,200) };
+    });
+    // Limit to A-H (8 options)
+    if (options.length > 8) options.length = 8;
+    questions.push({ questionText: questionText.slice(0,300), options });
+  }
+  return questions;
+}
+
+function buildPrompt(q) {
+  let prompt = `Question: ${q.questionText}\nOptions:`;
+  const letters = 'ABCDEFGH';
+  q.options.forEach((opt, idx) => {
+    prompt += `\n${letters[idx]}) ${opt.label}`;
+  });
+  prompt += `\nReturn ONLY the single best option letter.`;
+  return prompt;
+}
+
+function addMarker(inputEl) {
+  const labelNode = inputEl.closest('label') || inputEl.parentElement;
+  if (!labelNode) return;
+  if (labelNode.querySelector('.skury-answer-marker')) return; // already
+  const marker = document.createElement('span');
+  marker.className = 'skury-answer-marker';
+  labelNode.appendChild(marker);
+  inputEl.addEventListener('change', () => {
+    if (inputEl.checked && marker.isConnected) marker.remove();
+  }, { once: false });
+}
+
+async function solveFormWorkflow(sendResponse) {
+  try {
+    const questions = collectFormQuestions();
+    if (!questions.length) {
+      sendResponse({ error: 'No form questions detected on this page.' });
+      return;
+    }
+    const letters = 'ABCDEFGH';
+    for (const q of questions) {
+      const prompt = buildPrompt(q);
+      // Await model answer
+      const reply = await new Promise((resolve) => {
+        safeSendMessage({ type: 'callGemini', prompt }, (resp) => resolve(resp));
+      });
+      const letter = reply && reply.reply ? reply.reply.trim().charAt(0).toUpperCase() : null;
+      const idx = letter ? letters.indexOf(letter) : -1;
+      if (idx >= 0 && q.options[idx]) {
+        addMarker(q.options[idx].input);
+      }
+    }
+    sendResponse({ solved: true, count: questions.length });
+  } catch (e) {
+    sendResponse({ error: e.message || 'Failed to solve form.' });
+  }
+}
+
+// Dedicated listener for solveForm to keep existing listener minimal
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.type === 'solveForm') {
+    solveFormWorkflow(sendResponse);
+    return true; // async
+  }
+});

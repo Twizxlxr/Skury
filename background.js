@@ -4,17 +4,17 @@
 function isLikelyMCQ(text) {
   try {
     if (!text || typeof text !== 'string') return false;
-    // Count option-like tokens such as (A), A), A., A:
-    const optionPattern = /(^|\s)[(\[]?[A-D][)\].: -]/ig;
+    // Support options A-H to cover extended sets
+    const optionPattern = /(^|\s)[(\[]?[A-H][)\].: -]/ig;
     const matches = text.match(optionPattern);
     return !!(matches && matches.length >= 2);
   } catch { return false; }
 }
 
-// Helper: extract a single letter A-D from a model reply
+// Helper: extract a single letter A-H from a model reply
 function extractMCQLetter(text) {
   if (!text) return null;
-  const m = text.match(/\b([A-D])\b/i) || text.match(/(?:^|\s)([A-D])(?=\s|\.|,|$)/i);
+  const m = text.match(/\b([A-H])\b/i) || text.match(/(?:^|\s)([A-H])(?=\s|\.|,|$)/i);
   return m ? m[1].toUpperCase() : null;
 }
 

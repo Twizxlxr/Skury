@@ -52,6 +52,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const readPageBtn = document.getElementById("readPageBtn");
   const uploadBtn = document.getElementById("uploadBtn");
   const fileInput = document.getElementById("fileInput");
+  const solveFormBtn = document.getElementById("solveFormBtn");
 
   // Check if elements were found.
   if (!chatInput || !sendBtn || !chatOutput) {
@@ -143,6 +144,23 @@ document.addEventListener("DOMContentLoaded", () => {
           chatOutput.appendChild(err);
           chatOutput.scrollTop = chatOutput.scrollHeight;
         }
+      });
+    });
+  }
+  if (solveFormBtn) {
+    solveFormBtn.addEventListener('click', () => {
+      const loadingMsg = addMessageToChat('Gemini', 'Scanning form and solving...');
+      chrome.runtime.sendMessage({ type: 'solveForm' }, (resp) => {
+        if (!resp) {
+          loadingMsg.innerHTML = '<strong>Error:</strong> No response';
+        } else if (resp.error) {
+          loadingMsg.innerHTML = `<strong>Error:</strong> ${resp.error}`;
+        } else if (resp.solved) {
+          loadingMsg.innerHTML = `<strong>Gemini:</strong> Solved ${resp.count} questions.`;
+        } else {
+          loadingMsg.innerHTML = `<strong>Gemini:</strong> ${resp.message || 'Completed.'}`;
+        }
+        chatOutput.scrollTop = chatOutput.scrollHeight;
       });
     });
   }

@@ -162,6 +162,22 @@
   border-left: 1px solid rgba(0,0,0,0.06);
 }
 
+/* === Form Solver Answer Marker === */
+.skury-answer-marker {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  background: radial-gradient(circle at 30% 30%, rgba(139,92,246,0.85), rgba(139,92,246,0.25));
+  box-shadow: 0 0 0 1px rgba(139,92,246,0.35);
+  vertical-align: middle;
+  opacity: 0.85;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.skury-answer-marker:hover { opacity: 1; transform: scale(1.2); }
+
+
 /* Panel should be visually on the right and not cause layout reflow */
 #skuryPanel {
   right: 0;

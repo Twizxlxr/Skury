@@ -28,9 +28,24 @@ function applyBubbleTheme(theme) {
   bubble.classList.add(`theme-${normalized}`);
 }
 
-chrome.storage.local.get(['skuryTheme'], (result) => {
-  applyBubbleTheme(result.skuryTheme);
-});
+// Safely load theme with error handling
+try {
+  if (chrome && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(['skuryTheme'], (result) => {
+      if (chrome.runtime.lastError) {
+        console.warn('Skury: Failed to load theme:', chrome.runtime.lastError);
+        applyBubbleTheme('dark');
+      } else {
+        applyBubbleTheme(result.skuryTheme);
+      }
+    });
+  } else {
+    applyBubbleTheme('dark');
+  }
+} catch (e) {
+  console.warn('Skury: Theme loading error:', e);
+  applyBubbleTheme('dark');
+}
 
 // 1. Create floating bubble (guard against duplicates)
 let bubble = document.getElementById("aiBubble");

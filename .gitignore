@@ -1,0 +1,15 @@
+# VS Code
+.vscode/
+
+# Node / builds
+node_modules/
+dist/
+build/
+
+# Env files
+.env
+.env.*
+
+# OS files
+Thumbs.db
+Desktop.ini
